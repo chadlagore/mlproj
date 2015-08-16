@@ -1,0 +1,167 @@
+---
+title: "HAR-ML"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    toc: true
+---
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE, fig.width=15, fig.height=7, results='hide')
+require(caret)
+require(ggplot2)
+require(mlearning)
+```
+
+```{r, cache=TRUE, echo = FALSE}
+load("mod_rf.RData")
+load("mod_nb.RData")
+load("mod_gbm.RData")
+load("mod_rpart.RData")
+load("mod_lda.RData")
+```
+
+## Executive Summary
+
+For the purpose of furthering Human Activity Recognition, data was gathered by Ugulino et al. on a group of six young weightlifters. The goal of the study was to predict, using wearable sensors, "how well an activity is performed by the weightlifter." Each subject performed 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions,$^1$
+
+* Exactly according to the specification (Class A)
+* Throwing the elbows to the front (Class B)
+* Lifting the dumbbell only halfway (Class C)
+* Lowering the dumbbell only halfway (Class D)
+* Throwing the hips to the front (Class E)
+
+A random forest machine learning model was applied to the data, and an accuracy rate of 99.0% percent was achieved on predicting which class of error the participant was making. Prior to modelling, the data was processed to remove highly correlative features, missing values, and features with near zero variance. Further improvements could be made by adding additional pre-processing elements, with more computing power.
+
+## Preprocessing (Figure 1)
+
+The model was built using a Random Forest algorithm from the `caret` package. Preprocessing of the entire data set prior to partitioning, took place as follows:
+
+1. Removed user information including name, timestamps and window information - though window information may be valuable for k-fold analysis, the model still attained 99% out of sample accuracy *without* using it.
+
+2. Removed features containing mostly NA values - features that contained NA values were more than 97% NA, it made sense to remove them entirely.
+
+3. Using the `nearZeroVar` function in the `caret` package, I removed features that had sufficiently low variance - this offered some serious dimension reduction.
+
+4. Using the `findCorrelation` function in the `caret` package, I removed features that had sufficiently high correlation with other features - more dimension reduction.
+
+5. I did no scaling or centering of the data. Some variables appeared slightly skewed. If I had more computing power, I would ask the train function to do either `pca`, `scaling` or `centering` of the features.
+
+## Partitioning (Figure 2)
+
+For partitioning the dataset, I used `caret`'s `createDataPartition` to create three datasets, training, testing and validation. I did this with the goal of ensembling different models in the case that my out of sample accuracy was low. When a high accuracy was achieved with just one model, the validation set became redundant. The partitions were intentially applied following dimension reduction.
+
+## Final Model (Figure 3)
+
+I attempted 5 different models on the tidied dataset, they had varying levels of accuracy. Random foresting was the most accurate, see the next section for more information on out of sample error rates and cross validation.
+
+## Cross Validation and Out of Sample Error (Figure 4 & 4a)
+
+For cross validation, I used a `confusionMatrix` from the `caret` package. The `confusionMatrix` caters well to the the nature of the problem (classifier). The following out of sample error rates resulted.
+
+* Generalized Boosted Regression Modelling`gbm` - 4.3%
+* Random Forest `rf` - *1.0%*
+* Recursive Partitioning and Regression Trees `rpart`- 50%
+* Linear Discriminant Analysis `lda` - 32.8%
+* Naive Bayes `nb` - 22%
+
+## Submission (Figure 5)
+
+The resulting features on the training set were selected from the `pml-testing` set. The same model was run, all 20 cases were accurately predicted.
+
+## Appendix
+**Figure 1 Pre-Processing**
+```{r, DIMENSION REDUCTION, echo = TRUE}
+dat <- read.csv("pml-training.csv")
+
+# Remove window information.
+windows <- dat[,1:7]
+dat <- dat[,-(1:7)]
+
+# Test each column to find percentage NA.
+percentNA <- apply(dat, 
+                   2, 
+                   function(x) {
+                         sum(is.na(x)/dim(dat)[1])
+                         }
+                  )
+
+# Remove features over 97% NA
+dat <- dat[, names(which(percentNA < 0.97))]
+# Remove features with low variance.
+dat <- dat[,-nearZeroVar(x = dat)]
+# Remove features with high correlation.
+dat <- dat[,-findCorrelation(cor(dat[,-ncol(dat)]))]
+```
+**Figure 2 Partioning**
+```{r BUILD SETS}
+# Reseparate training data into validation and testing sets.
+inBuild <- createDataPartition(dat$classe,
+                               p = 0.7,
+                               list = FALSE)
+
+validation <- dat[-inBuild, ]
+buildData <- dat[inBuild, ]
+
+inTrain <- createDataPartition(buildData$classe,
+                               p = 0.7,
+                               list = FALSE)
+
+training <- buildData[inTrain, ]
+testing <- buildData[-inTrain, ]
+```
+**Figure 3 Final Model**
+```{r FINAL MODEL, eval = FALSE}
+mod_rf <<- train(classe ~., data = training, method = "rf") ## Took 52 minutes to model.
+mod_rf
+Random Forest 
+
+9619 samples
+  45 predictor
+   5 classes: 'A', 'B', 'C', 'D', 'E' 
+
+No pre-processing
+Resampling: Bootstrapped (25 reps) 
+Summary of sample sizes: 9619, 9619, 9619, 9619, 9619, 9619, ... 
+Resampling results across tuning parameters:
+
+  mtry  Accuracy   Kappa      Accuracy SD  Kappa SD   
+   2    0.9805670  0.9754021  0.003438120  0.004366577
+  23    0.9831388  0.9786623  0.002709733  0.003434078
+  45    0.9727637  0.9655303  0.005698091  0.007223934
+
+Accuracy was used to select the optimal model using  the largest value.
+The final value used for the model was mtry = 23. 
+```
+**Figure 4 Random Forest Confusion Matrix**
+```{r CROSS VALIDATION, echo = FALSE, eval = TRUE, results = 'asis', caption = "Random Forest Confusion Matrix Heat Map"}
+rfConf <- confusion(x = predict(mod_rf, validation), y = validation$classe)
+confusionImage(rfConf)
+```
+**Figure 4a Accuracies from Individual Models**
+```{r, caption = "Model Accuracies", results = 'asis', echo = FALSE}
+knitr::kable(rbind(
+    c("rf", "gbm", "nb", "lda", "rpart"),
+    c(
+        confusionMatrix(predict(mod_rf, validation), 
+                        validation$classe)$overall[1],
+        confusionMatrix(predict(mod_GBM, testing), 
+                        testing$classe)$overall[1],
+        NA,
+        confusionMatrix(predict(mod_LDA, validation), 
+                        validation$classe)$overall[1],
+        confusionMatrix(predict(mod_rpart, validation), 
+                        validation$classe)$overall[1]
+    )
+))    
+```
+
+**Figure 5 Submission**
+```{r TIDY TEST SET}
+test.set <- read.csv("pml-testing.csv")
+test.set <- test.set[, c(names(training[,-46]), "problem_id")]
+```
+
+## References
+
+$^1$ Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6
