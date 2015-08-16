@@ -1,5 +1,6 @@
 ---
-title: "HAR-ML"
+title: "Human Activity Recognition - Weightlifting Technique Optimization with Machine Learning"
+author: Chad Lagore
 output:
   html_document:
     theme: united
